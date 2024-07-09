@@ -9,12 +9,14 @@ import (
 	"github.com/ipfs/go-datastore/namespace"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-f3"
 	"github.com/filecoin-project/go-f3/blssig"
 	"github.com/filecoin-project/go-f3/certs"
 	"github.com/filecoin-project/go-f3/gpbft"
+	"github.com/filecoin-project/go-f3/manifest"
 	"github.com/filecoin-project/venus/pkg/chain"
 	"github.com/filecoin-project/venus/pkg/config"
 	"github.com/filecoin-project/venus/pkg/constants"
@@ -30,40 +32,40 @@ type F3 struct {
 }
 
 type F3Params struct {
-	NetworkName   string
-	NetworkParams *config.NetworkParamsConfig
-	PubSub        *pubsub.PubSub
-	Host          host.Host
-	ChainStore    *chain.Store
-	StateManager  *statemanger.Stmgr
-	Datastore     datastore.Batching
-	Wallet        v1api.IWallet
+	NetworkName      string
+	NetworkParams    *config.NetworkParamsConfig
+	ManifestProvider manifest.ManifestProvider
+	PubSub           *pubsub.PubSub
+	Host             host.Host
+	ChainStore       *chain.Store
+	StateManager     *statemanger.Stmgr
+	Datastore        datastore.Batching
+	Wallet           v1api.IWallet
 }
 
 var log = logging.Logger("f3")
 
 func New(mctx context.Context, params F3Params) (*F3, error) {
-	manifest := f3.LocalnetManifest()
-	manifest.NetworkName = gpbft.NetworkName(params.NetworkName)
-	manifest.ECDelay = 2 * time.Duration(params.NetworkParams.BlockDelay) * time.Second
-	manifest.ECPeriod = manifest.ECDelay
-	manifest.BootstrapEpoch = int64(params.NetworkParams.F3BootstrapEpoch)
-	manifest.ECFinality = int64(constants.Finality)
-
+	params.ManifestProvider = NewManifestProvider(&params)
 	ds := namespace.Wrap(params.Datastore, datastore.NewKey("/f3"))
 	ec := &ecWrapper{
 		ChainStore:   params.ChainStore,
 		StateManager: params.StateManager,
-		Manifest:     manifest,
 	}
 	verif := blssig.VerifierWithKeyOnG1()
 
-	module, err := f3.New(mctx, manifest, ds,
-		params.Host, params.PubSub, verif, ec, log, nil)
+	senderID, err := peer.Decode(params.NetworkParams.ManifestServerID)
+	if err != nil {
+		return nil, xerrors.Errorf("decoding F3 manifest server identity: %w", err)
+	}
+
+	module, err := f3.New(mctx, params.ManifestProvider, ds,
+		params.Host, senderID, params.PubSub, verif, ec, log, nil)
 
 	if err != nil {
 		return nil, xerrors.Errorf("creating F3: %w", err)
 	}
+	params.ManifestProvider.SetManifestChangeCallback(f3.ManifestChangeCallback(module))
 
 	fff := &F3{
 		inner:  module,
@@ -147,4 +149,27 @@ func (fff *F3) GetCert(ctx context.Context, instance uint64) (*certs.FinalityCer
 
 func (fff *F3) GetLatestCert(ctx context.Context) (*certs.FinalityCertificate, error) {
 	return fff.inner.GetLatestCert(ctx)
+}
+
+func NewManifestProvider(params *F3Params) manifest.ManifestProvider {
+	m := manifest.LocalDevnetManifest()
+	m.NetworkName = gpbft.NetworkName(params.NetworkName)
+	m.ECDelay = 2 * time.Duration(params.NetworkParams.BlockDelay) * time.Second
+	m.ECPeriod = m.ECDelay
+	m.BootstrapEpoch = int64(params.NetworkParams.F3BootstrapEpoch)
+	m.ECFinality = int64(constants.Finality)
+	m.CommiteeLookback = 5
+
+	ec := &ecWrapper{
+		ChainStore:   params.ChainStore,
+		StateManager: params.StateManager,
+	}
+
+	switch manifestServerID, err := peer.Decode(params.NetworkParams.ManifestServerID); {
+	case err != nil:
+		log.Warnw("Cannot decode F3 manifest sever identity; falling back on static manifest provider", "err", err)
+		return manifest.NewStaticManifestProvider(m)
+	default:
+		return manifest.NewDynamicManifestProvider(m, params.PubSub, ec, manifestServerID)
+	}
 }

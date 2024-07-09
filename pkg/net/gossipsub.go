@@ -313,7 +313,8 @@ func NewGossipSub(ctx context.Context,
 	}
 	allowTopics = append(allowTopics, drandTopics...)
 	if f3enabled {
-		allowTopics = append(allowTopics, gpbft.NetworkName(networkName).PubSubTopic())
+		f3TopicName := gpbft.NetworkName(networkName)
+		allowTopics = append(allowTopics, string(f3TopicName))
 	}
 	options = append(options,
 		pubsub.WithSubscriptionFilter(
