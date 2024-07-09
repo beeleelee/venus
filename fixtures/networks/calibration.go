@@ -75,8 +75,9 @@ func Calibration() *NetworkConf {
 			AllowableClockDriftSecs: 1,
 			Eip155ChainID:           314159,
 			ActorDebugging:          false,
-			F3Enabled:               false,
-			F3BootstrapEpoch:        -1,
+			F3Enabled:               true,
+			F3BootstrapEpoch:        9999999999 + 100,
+			ManifestServerID:        "12D3KooWHcNBkqXEBrsjoveQvj6zDF3vK5S9tAfqyYaQF1LGSJwG",
 		},
 	}
 

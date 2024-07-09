@@ -76,6 +76,7 @@ func Mainnet() *NetworkConf {
 			ActorDebugging:          false,
 			F3Enabled:               false,
 			F3BootstrapEpoch:        -1,
+			ManifestServerID:        "12D3KooWHcNBkqXEBrsjoveQvj6zDF3vK5S9tAfqyYaQF1LGSJwG",
 		},
 	}
 
